@@ -49,7 +49,8 @@ pub async fn start_static_server(static_path: String, port: u16) -> InvokeRespon
             data: json!(null),
         };
     }
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    //let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let router = Router::new().nest_service("/", ServeDir::new(static_path.clone()));
 
