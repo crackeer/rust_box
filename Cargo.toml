@@ -1,0 +1,28 @@
+[package]
+name = "rust_box"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "1.2.4", features = ["api-all", "devtools"] }
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+base64 = {version = "0.21.2"}
+rust-embed="6.7.0"
+lazy_static = "1.4.0"
+tokio = { version = "1.29.1", features = ["full"] }
+zip = "0.5.12"
+bytes = "1.0"
+tar = "0.4"
+flate2 = "1.0"
+scraper = "0.12.0"
+ssh2 = "0.9.4"
+rand = "0.8.5"
+axum = { version = "0.7.4"}
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5.0", features = ["fs", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
