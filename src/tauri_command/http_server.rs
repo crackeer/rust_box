@@ -1,7 +1,6 @@
 use super::define::InvokeResponse;
 use axum::Router;
 use serde_json::json;
-use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio;

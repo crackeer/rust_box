@@ -2,7 +2,7 @@ use super::define::InvokeResponse;
 use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
-use crate::toolbox::file;
+use crate::toolbox::http_request;
 use scraper::{Html, Selector};
 use tauri;
 
@@ -54,7 +54,7 @@ pub fn request(
 #[tauri::command]
 pub async fn parse_js_code(url: String) -> Vec<String> {
     let mut list : Vec<String> = Vec::new();
-    let result = file::download_text(&url).await;
+    let result = http_request::download_text(&url).await;
     if let Err(_err) = result {
         return list
     }
@@ -72,7 +72,7 @@ pub async fn parse_js_code(url: String) -> Vec<String> {
 
 #[tauri::command]
 pub async fn parse_html_title(url: String) -> String {
-    let result = file::download_text(&url).await;
+    let result = http_request::download_text(&url).await;
     if let Err(_err) = result {
         return String::from("");
     }

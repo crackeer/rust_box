@@ -13,7 +13,7 @@ pub async fn download_file_to(url: &str, dest : &str) -> Result<(), String> {
     // Download
     let response = result.unwrap();
     let bytes = response.bytes().await;
-    let content = bytes.unwrap().as_ref().clone().to_vec();
+    let content = bytes.unwrap().as_ref().to_vec();
     if let Err(err) = fs::write(Path::new(dest), &content) {
         return Err(err.to_string());
     }

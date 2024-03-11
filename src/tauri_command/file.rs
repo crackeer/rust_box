@@ -1,10 +1,11 @@
-use serde::Serialize;
+use super::define::{failure_response, success_response, InvokeResponse, Message};
 use std::{
-    fs::{self, read_dir, File},
+    fs::{self, File},
     io::{ Read, Write},
     path::Path
 };
 use tauri::InvokeError;
+use serde_json::json;
 
 #[tauri::command]
 pub fn get_file_content(name: String) -> Result<String, InvokeError> {
@@ -21,117 +22,85 @@ pub fn get_file_content(name: String) -> Result<String, InvokeError> {
 }
 
 #[tauri::command]
-pub fn write_file(name: String, content: String) -> String {
-    let res = File::create(name);
-    if res.is_err() {
-        return res.err().unwrap().to_string();
-    }
-    let mut buffer = res.unwrap();
-    _ = buffer.write(content.as_bytes());
-    String::from("ok")
-}
-
-#[derive(Serialize)]
-pub struct FileItem {
-    path: String,
-    item_type: String,
-}
-
-#[tauri::command]
-pub fn simple_read_dir(dir: String, ext: String) -> Vec<FileItem> {
-    let mut list: Vec<FileItem> = Vec::new();
-    let entry = read_dir(dir);
-    if entry.is_err() {
-        return list;
-    }
-    for item in entry.unwrap().into_iter() {
-        if let Err(_) = item {
-            continue;
-        }
-        let file_name = item.as_ref().unwrap().file_name().into_string().unwrap();
-        let entry = item.unwrap().metadata().unwrap();
-        if entry.is_dir() {
-            if !file_name.starts_with(&".") {
-                list.push(FileItem {
-                    path: file_name,
-                    item_type: String::from("dir"),
-                })
-            }
-        } else {
-            if file_name.ends_with(&ext) {
-                list.push(FileItem {
-                    path: file_name,
-                    item_type: String::from("file"),
-                })
+pub fn write_file(name: String, content: String) -> InvokeResponse {
+    match File::create(name) {
+        Err(err) => {
+            failure_response(Message::IoError(err))
+        },
+        Ok(mut buffer) => {
+            match buffer.write(content.as_bytes()) {
+                Ok(_) => success_response(json!(null)),
+                Err(err) => failure_response(Message::IoError(err))
             }
         }
     }
-
-    list
 }
 
+
 #[tauri::command]
-pub fn write_media_file(dir: String, name : String, content: Vec<u8>) -> String {
+pub fn write_media_file(dir: String, name : String, content: Vec<u8>) -> InvokeResponse {
     let tmp_path = std::path::Path::new(&dir);
     if let Err(err) = std::fs::create_dir_all(&tmp_path) {
-        return err.to_string();
+        return failure_response(Message::IoError(err));
     }
     let path_buf = tmp_path.join(&name);
     if let Ok(mut file) = File::create(path_buf.as_path()) {
         if let Ok(_) = file.write_all(&content) {
-            return String::from("ok")
+            return  success_response(json!(null));
         }
     }
-    String::from("error")
+    success_response(json!(null))
 }
 
 #[tauri::command]
-pub fn create_dir(file_path: String) -> String {
+pub fn create_dir(file_path: String) -> InvokeResponse {
     if let Err(err) = fs::create_dir_all(String::from(file_path)) {
-        String::from(err.to_string())
+        failure_response(Message::IoError(err))
     } else {
-        String::from("ok")
+        success_response(json!(null))
     }
 }
 
 #[tauri::command]
-pub fn create_file(file_path: String) -> String {
+pub fn create_file(file_path: String) -> InvokeResponse {
     if let Err(err) = File::create(String::from(file_path)) {
-        String::from(err.to_string())
+        failure_response(Message::IoError(err))
     } else {
-        String::from("ok")
+        success_response(json!(null))
     }
 }
 
 #[tauri::command]
-pub fn delete_file(file_path: String) -> String {
+pub fn delete_file(file_path: String) -> InvokeResponse {
     if let Err(err) =  fs::remove_file(String::from(file_path)) {
-        String::from(err.to_string())
+        failure_response(Message::IoError(err))
     } else {
-        String::from("ok")
+        success_response(json!(null))
     }
 }
 
 #[tauri::command]
-pub fn delete_folder(file_path: String) -> String {
+pub fn delete_folder(file_path: String) -> InvokeResponse {
     if let Err(err) =  fs::remove_dir_all(String::from(file_path)) {
-        String::from(err.to_string())
+        failure_response(Message::IoError(err))
     } else {
-        String::from("ok")
+        success_response(json!(null))
     }
 }
 
 #[tauri::command]
-pub fn rename_file(file_path: String, new_file_path : String) -> String {
+pub fn rename_file(file_path: String, new_file_path : String) -> InvokeResponse {
     if let Err(err) =  fs::rename(String::from(file_path), String::from(new_file_path)) {
-        String::from(err.to_string())
+        failure_response(Message::IoError(err))
     } else {
-        String::from("ok")
+        success_response(json!(null))
     }
 }
 
 #[tauri::command]
-pub fn file_exists(file_path: String) -> bool {
-    Path::new(&file_path).exists()
+pub fn file_exists(file_path: String) -> InvokeResponse {
+    success_response(json!({
+        "exists" : Path::new(&file_path).exists(),
+    }))
 }
 

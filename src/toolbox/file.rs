@@ -1,8 +1,6 @@
-
-use reqwest;
-use std::fs::{self};
-use std::path::Path;
-use std::io::{copy};
+use serde::Serialize;
+use std::{fs::read_dir, path::Path};
+use readable::byte::Byte;
 
 #[allow(dead_code)]
 pub fn create_file_parent_directory(dest: &str) -> Result<(), String> {
@@ -13,69 +11,58 @@ pub fn create_file_parent_directory(dest: &str) -> Result<(), String> {
     return Ok(());
 }
 
-pub async fn download_file_to(url: &str, dest : &str) -> Result<(), String> {
-    let result =  reqwest::get(url).await;
-    if let Err(err) = result {
-        return Err(err.to_string());
-    }
-   
-    // Download
-    let response = result.unwrap();
-    let bytes = response.bytes().await;
-    let content = bytes.unwrap().as_ref().clone().to_vec();
-    if let Err(err) = fs::write(Path::new(dest), &content) {
-        return Err(err.to_string());
-    }
-    Ok(())
+#[derive(Serialize)]
+pub struct FileInfo {
+    name: String,
+    file_type: String,
+    size : u64,
+    human_size: String,
 }
 
-pub fn extract_zip(zip_file: &str, dir: &str) -> Result<(), String>{
-    let zipfile = std::fs::File::open(zip_file);
-    if let Err(err) = zipfile {
-        return  Err(err.to_string());
+pub fn simple_read_dir(dir: String) -> Vec<FileInfo> {
+    let mut list: Vec<FileInfo> = Vec::new();
+    let entry = read_dir(dir);
+    if entry.is_err() {
+        return list;
     }
-    let mut zip = zip::ZipArchive::new(zipfile.unwrap()).unwrap();
-
-    let target = Path::new(dir);
-    if !target.exists() {
-        if let Err(err)= fs::create_dir_all(target) {
-            return Err(err.to_string());
+    for item in entry.unwrap().into_iter() {
+        if let Err(_) = item {
+            continue;
         }
-    }
-    for i in 0..zip.len() {
-        let mut file = zip.by_index(i).unwrap();
-        if file.is_dir() {
-            println!("file utf8 path {:?}", file.name_raw()); //文件名编码,在windows下用winrar压缩的文件夹，中文文夹件会码(发现文件名是用操作系统本地编码编码的，我的电脑就是GBK),本例子中的压缩的文件再解压不会出现乱码
-            let target = target.join(Path::new(&file.name().replace("\\", "")));
-            if let Err(err) = fs::create_dir_all(target) {
-                return Err(err.to_string());
+        if let Ok(ref file) = item {
+            let meta = file.metadata().unwrap();
+            let mut name = String::from("");
+            if let Ok(value) = file.file_name().into_string() {
+                name = value;
             }
-        } else {
-            let file_path = target.join(Path::new(file.name()));
-            let mut target_file = if !file_path.exists() {
-                println!("file path {}", file_path.to_str().unwrap());
-                fs::File::create(file_path).unwrap()
+            if meta.is_dir() {
+                list.push(FileInfo {
+                    name: name,
+                    file_type: String::from("directory"),
+                    size: meta.len(),
+                    human_size:Byte::from(meta.len()).to_string(),
+                });
             } else {
-                fs::File::open(file_path).unwrap()
-            };
-            if let Err(err) = copy(&mut file, &mut target_file) {
-                return Err(err.to_string());
+                list.push(FileInfo {
+                    name: name,
+                    file_type: String::from("file"),
+                    size : meta.len(),
+                    human_size:Byte::from(meta.len()).to_string(),
+                });
             }
-            // target_file.write_all(file.read_bytes().into());
         }
     }
-    Ok(())
+    list
 }
 
-
-pub async fn download_text(url: &str) -> Result<String, String> {
-    let result =  reqwest::get(url).await;
-    if let Err(err) = result {
-        return Err(err.to_string());
-    }
-
-    match result {
-        Ok(res) => Ok(res.text().await.unwrap()),
-        Err(err) => Err(err.to_string()),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_simple_read_dir() {
+        let result = simple_read_dir(String::from("/Users/liuhu016/rust/rust_box"));
+        for item in result.iter() {
+            println!("{}-{}-{}", item.name, item.file_type, item.human_size)
+        }
     }
 }
