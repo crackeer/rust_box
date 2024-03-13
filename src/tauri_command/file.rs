@@ -1,4 +1,5 @@
 use super::define::{failure_response, success_response, InvokeResponse, Message};
+use crate::toolbox::file;
 use std::{
     fs::{self, File},
     io::{ Read, Write},
@@ -102,5 +103,10 @@ pub fn file_exists(file_path: String) -> InvokeResponse {
     success_response(json!({
         "exists" : Path::new(&file_path).exists(),
     }))
+}
+
+#[tauri::command]
+pub fn list_folder(file_path: String) -> InvokeResponse {
+    success_response(json!(file::simple_read_dir(file_path)))
 }
 
