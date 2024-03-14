@@ -7,7 +7,7 @@ use scraper::{Html, Selector};
 use tauri;
 
 #[tauri::command]
-pub fn request(
+pub fn do_http_request(
     url: String,
     method: String,
     data: Value,
