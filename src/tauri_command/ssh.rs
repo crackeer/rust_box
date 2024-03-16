@@ -413,7 +413,7 @@ pub async fn connect_server(
 }
 
 #[tauri::command]
-pub async fn exec_command(session_key: String, cmd_string: String, split: bool) -> InvokeResponse {
+pub async fn remote_exec_command(session_key: String, cmd_string: String, split: bool) -> InvokeResponse {
     let list = SESSION_MAP.lock().unwrap();
     match list.get(&session_key) {
         Some(sess) => {
