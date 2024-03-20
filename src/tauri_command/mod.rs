@@ -4,3 +4,4 @@ pub mod http_server;
 pub mod file;
 pub mod ssh;
 pub mod network;
+pub mod docker;
