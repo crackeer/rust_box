@@ -3,7 +3,7 @@ use crate::toolbox::file;
 use std::{
     fs::{self, File},
     io::{ Read, Write},
-    path::Path
+    path::Path, env
 };
 use tauri::InvokeError;
 use serde_json::json;
@@ -81,7 +81,7 @@ pub fn delete_file(file_path: String) -> InvokeResponse {
 }
 
 #[tauri::command]
-pub fn delete_folder(file_path: String) -> InvokeResponse {
+pub fn delete_dir(file_path: String) -> InvokeResponse {
     if let Err(err) =  fs::remove_dir_all(String::from(file_path)) {
         failure_response(Message::IoError(err))
     } else {
@@ -108,6 +108,14 @@ pub fn file_exists(file_path: String) -> InvokeResponse {
 #[tauri::command]
 pub fn list_folder(file_path: String) -> InvokeResponse {
     success_response(json!(file::simple_read_dir(file_path)))
+}
+
+#[tauri::command]
+pub fn get_temp_dir() -> InvokeResponse {
+    let dir = env::temp_dir();
+    success_response(json!({
+        "temp_dir" : dir,
+    }))
 }
 
 
