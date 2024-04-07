@@ -1,9 +1,9 @@
-use super::define::InvokeResponse;
+use super::define::{failure_response, success_response, InvokeResponse, Message};
+use crate::toolbox::http_request;
+use scraper::{Html, Selector};
 use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
-use crate::toolbox::http_request;
-use scraper::{Html, Selector};
 use tauri;
 
 #[tauri::command]
@@ -49,17 +49,15 @@ pub fn do_http_request(
     }
 }
 
-
-
 #[tauri::command]
 pub async fn parse_js_code(url: String) -> Vec<String> {
-    let mut list : Vec<String> = Vec::new();
+    let mut list: Vec<String> = Vec::new();
     let result = http_request::download_text(&url).await;
     if let Err(_err) = result {
-        return list
+        return list;
     }
     let html = result.unwrap();
-   
+
     let document = Html::parse_document(&html);
     let script_selector = Selector::parse("script").unwrap();
 
@@ -77,13 +75,32 @@ pub async fn parse_html_title(url: String) -> String {
         return String::from("");
     }
     let html = result.unwrap();
-   
+
     let document = Html::parse_document(&html);
     let script_selector = Selector::parse("title").unwrap();
 
     for script in document.select(&script_selector) {
-        return  script.inner_html();
+        return script.inner_html();
     }
     String::from("")
 }
 
+#[tauri::command]
+pub async fn parse_github_ip() -> InvokeResponse {
+    let result = http_request::download_text(&"https://sites.ipaddress.com/www.github.com/").await;
+    if let Err(err) = result {
+        return failure_response(Message::String(err.to_string()));
+    }
+    let html = result.unwrap();
+
+    let document = Html::parse_document(&html);
+    let tab_dns_selector = Selector::parse("#tabpanel-dns-a pre a").unwrap();
+
+    for script in document.select(&tab_dns_selector) {
+        let script_content = script.inner_html();
+        return success_response(json!({
+            "ip" : &script_content,
+        }));
+    }
+    failure_response(Message::String(String::from("no ip found")))
+}
