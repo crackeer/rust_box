@@ -5,8 +5,8 @@ use std::process::Command;
 use tauri;
 
 #[tauri::command]
-pub fn run_js_code(code: String) -> InvokeResponse {
-    match Command::new("node").arg("-e").arg(code).output() {
+pub fn run_js_code(node_path: String, code: String) -> InvokeResponse {
+    match Command::new(&node_path).arg("-e").arg(code).output() {
         Err(err) => failure_response(Message::String(err.to_string())),
         Ok(output) => {
             if !output.status.success() {
