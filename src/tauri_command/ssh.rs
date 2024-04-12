@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use ssh2::DisconnectCode::AuthCancelledByUser;
 use ssh2::Session;
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::fs;
 use std::io::prelude::*;
@@ -40,7 +40,7 @@ lazy_static! {
 
 fn init_upload_info(local_file: String, remote_file: String, total_size: u64) {
     let mut upload_info = UPLOAD_INFO.lock().unwrap();
-    let  upload_info = upload_info.borrow_mut();
+    let upload_info = upload_info.borrow_mut();
     upload_info.local_file = local_file;
     upload_info.remote_file = remote_file;
     upload_info.total_size = total_size;
@@ -49,28 +49,25 @@ fn init_upload_info(local_file: String, remote_file: String, total_size: u64) {
     upload_info.message = String::from("");
 }
 
-
 fn incr_upload_size(size: u64) {
     let mut upload_info = UPLOAD_INFO.lock().unwrap();
-    let  upload_info = upload_info.borrow_mut();
-    upload_info.upload_size =  upload_info.upload_size + size;
+    let upload_info = upload_info.borrow_mut();
+    upload_info.upload_size = upload_info.upload_size + size;
 }
 
 fn clear_upload_info() {
     let mut upload_info = UPLOAD_INFO.lock().unwrap();
-    let  upload_info = upload_info.borrow_mut();
-    upload_info.local_file =  String::from("");
-    upload_info.remote_file =  String::from("");
+    let upload_info = upload_info.borrow_mut();
+    upload_info.local_file = String::from("");
+    upload_info.remote_file = String::from("");
 }
 
-fn mark_upload_failure(message : String) {
+fn mark_upload_failure(message: String) {
     let mut upload_info = UPLOAD_INFO.lock().unwrap();
-    let  upload_info = upload_info.borrow_mut();
-    upload_info.status =  String::from("failure");
-    upload_info.message =  message;
+    let upload_info = upload_info.borrow_mut();
+    upload_info.status = String::from("failure");
+    upload_info.message = message;
 }
-
-
 
 static mut CANCEL_SIGNAL: i32 = 10;
 
@@ -270,9 +267,7 @@ pub async fn upload_remote_file(
 
     let mut reader = BufReader::new(tmp_file.unwrap()); // 创建 BufReader
     init_upload_info(local_file.to_string(), path.to_string(), file_size);
-    unsafe{
-        CANCEL_SIGNAL = 0
-    }
+    unsafe { CANCEL_SIGNAL = 0 }
     loop {
         unsafe {
             if CANCEL_SIGNAL > 0 {
@@ -413,7 +408,11 @@ pub async fn connect_server(
 }
 
 #[tauri::command]
-pub async fn remote_exec_command(session_key: String, cmd_string: String, split: bool) -> InvokeResponse {
+pub async fn remote_exec_command(
+    session_key: String,
+    cmd_string: String,
+    split: bool,
+) -> InvokeResponse {
     let list = SESSION_MAP.lock().unwrap();
     match list.get(&session_key) {
         Some(sess) => {
