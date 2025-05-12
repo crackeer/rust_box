@@ -1,22 +1,22 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tauri::InvokeError;
 use std::io::Error;
+use tauri::Error as TauriError;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InvokeResponse {
     pub success: bool,
     pub message: String,
-    pub data : serde_json::Value,
+    pub data: serde_json::Value,
 }
 
 pub enum Message {
     String(String),
-    InvokeError(InvokeError),
+    InvokeError(TauriError),
     IoError(Error),
 }
 
-pub fn success_response(value : serde_json::Value) -> InvokeResponse {
+pub fn success_response(value: serde_json::Value) -> InvokeResponse {
     InvokeResponse {
         success: true,
         message: "success".to_string(),
@@ -24,9 +24,9 @@ pub fn success_response(value : serde_json::Value) -> InvokeResponse {
     }
 }
 
-pub fn failure_response(msg : Message) -> InvokeResponse {
+pub fn failure_response(msg: Message) -> InvokeResponse {
     match msg {
-        Message::String(msg) =>  InvokeResponse {
+        Message::String(msg) => InvokeResponse {
             success: false,
             message: msg,
             data: json!({}),
@@ -39,15 +39,11 @@ pub fn failure_response(msg : Message) -> InvokeResponse {
                 message: format!("{:?}", err),
                 data: json!({}),
             }
-        },
-        Message::IoError(err) => {
-            InvokeResponse {
-                success: false,
-                message: err.to_string(),
-                data: json!({}),
-            }
         }
+        Message::IoError(err) => InvokeResponse {
+            success: false,
+            message: err.to_string(),
+            data: json!({}),
+        },
     }
-   
 }
-
