@@ -29,3 +29,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 readable = { version = "0.16.0"}
 bollard = "0.16.1"
 futures = "*"
+suppaftp = "^6"
+uuid = {"version" = "1.17.0", features = ["v4"]}

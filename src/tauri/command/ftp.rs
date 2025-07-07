@@ -1,6 +1,8 @@
 use std::sync::{Arc, Mutex};
 use suppaftp::FtpStream;
 use uuid::Uuid;
+use std::net::{ SocketAddr};
+use std::time::Duration;
 
 lazy_static::lazy_static! {
     static ref FTP_CLIENTS: Arc<Mutex<std::collections::HashMap<String, FtpStream>>> = 
@@ -14,7 +16,9 @@ pub  async  fn connect_ftp(
     username: &str,
     password: &str,
 ) -> Result<String, String> {
-    let mut ftp = FtpStream::connect(format!("{}:{}", host, port))
+    let url = format!("{}:{}", host, port);
+    let addr: SocketAddr = url.parse().expect("invalid hostname");
+    let mut ftp = FtpStream::connect_timeout(addr, Duration::from_secs(10))
         .map_err(|e| format!("连接失败: {}", e))?;
     
     ftp.login(username, password)
