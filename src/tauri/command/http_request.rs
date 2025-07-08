@@ -2,6 +2,7 @@ use super::define::{failure_response, success_response, InvokeResponse, Message}
 use crate::toolbox::file::create_file_parent_directory;
 use crate::toolbox::http_request;
 use scraper::{Html, Selector};
+use serde::de::value;
 use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -116,4 +117,17 @@ pub async fn http_download_file(url: String, save_path: String) -> InvokeRespons
         return failure_response(Message::String(err.to_string()));
     }
     success_response(Value::Null)
+}
+
+#[tauri::command]
+pub async fn http_download_file_v2(url: String, save_path: String) -> InvokeResponse {
+    if let Err(e) = create_file_parent_directory(save_path.as_str()) {
+        return failure_response(Message::String(e.to_string()));
+    }
+    let result = http_request::download_file_to_v2(url.as_str(), save_path.as_str()).await;
+    if let Err(err) = result {
+        return failure_response(Message::String(err.to_string()));
+    }
+
+    success_response(Value::String(result.unwrap()))
 }
