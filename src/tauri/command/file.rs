@@ -1,26 +1,27 @@
 use super::define::{failure_response, success_response, InvokeResponse, Message};
 use crate::toolbox::file;
 use serde_json::json;
+use serde_json::Value;
 use std::{
     env,
     fs::{self, File},
     io::{Read, Write},
     path::Path,
 };
-use tauri::Error as InvokeError;
 
 #[tauri::command]
-pub fn get_file_content(name: String) -> Result<String, InvokeError> {
+pub fn get_file_content(name: String) -> InvokeResponse {
     let file = File::open(name);
-    let mut file = match file {
-        Ok(f) => f,
-        Err(err) => return Err(InvokeError::Io(err)),
-    };
-    let mut content = String::new();
-    if let Err(err) = file.read_to_string(&mut content) {
-        return Err(InvokeError::Io(err));
+    match file {
+        Ok(mut f) => {
+            let mut content = String::new();
+            if let Err(err) = f.read_to_string(&mut content) {
+                return failure_response(Message::IoError(err));
+            }
+            success_response(Value::String(content))
+        }
+        Err(err) => return failure_response(Message::IoError(err)),
     }
-    Ok(content)
 }
 
 #[tauri::command]
