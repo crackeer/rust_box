@@ -7,3 +7,4 @@ pub mod js;
 pub mod network;
 pub mod ssh;
 pub mod ftp;
+pub mod webview;
