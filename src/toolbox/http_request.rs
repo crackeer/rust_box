@@ -1,5 +1,4 @@
 
-use readable::byte;
 use reqwest;
 use std::fs::{self};
 use std::path::Path;

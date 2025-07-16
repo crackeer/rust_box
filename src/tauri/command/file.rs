@@ -114,3 +114,11 @@ pub fn get_temp_dir() -> InvokeResponse {
         "temp_dir" : dir,
     }))
 }
+
+#[tauri::command]
+pub fn create_jsonp_file(src_file: String, dest_file: String, hash_code: String) -> InvokeResponse {
+    match file::create_jsonp_file(src_file.as_str(), dest_file.as_str(), hash_code.as_str()) {
+        Ok(_) => success_response(json!(null)),
+        Err(err) => failure_response(Message::String(err)),
+    }
+}

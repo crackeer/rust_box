@@ -1,4 +1,7 @@
+use std::ffi::OsStr;
+
 use headless_chrome::{Browser, LaunchOptionsBuilder};
+use serde_json::Value;
 use tauri::{webview::WebviewWindowBuilder, AppHandle, Listener, Url, WebviewUrl};
 use tokio::time::Duration;
 #[tauri::command]
@@ -27,7 +30,8 @@ pub async fn open_new_webview(app_handle: AppHandle, url: &str) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn eval_js_on_page(url: &str, script: &str) -> Result<String, String> {
+pub async fn eval_js_on_page(url: &str, scripts: Vec<String>) -> Result<Vec<Value>, String> {
+    println!("url: {}", url);
     let browser = Browser::new(
         LaunchOptionsBuilder::default()
             .headless(true)
@@ -44,19 +48,19 @@ pub async fn eval_js_on_page(url: &str, script: &str) -> Result<String, String> 
 
     tab.wait_until_navigated()
         .map_err(|e| format!("等待导航完成失败: {}", e))?;
-    tokio::time::sleep(Duration::from_secs(5)).await;
-    // 执行 JS 获取全局变量
-    println!("script: {}", script);
-    let value: String = tab
-        .evaluate(
-            script, // 替换为你要读取的变量名
-            false,
-        )
-        .map_err(|e| format!("执行脚本失败: {}", e))?
-        .value
-        .map(|v| v.as_str().unwrap().to_string())
-        .unwrap_or_default();
-
-    println!("全局变量值: {}", value);
-    Ok(value)
+    println!("navigated");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let mut list: Vec<Value> = Vec::new();
+    for script in scripts {
+        println!("evaluate: {}", script);
+        let value: Value = match tab.evaluate(script.as_str(), false) {
+            Ok(v) => v.value.map(|v| v).unwrap_or_default(),
+            Err(e) => Value::String(format!("{}", e)),
+        };
+        list.push(value);
+    }
+    println!("list: {:?}", list);
+    //tab.close(true).map_err(|e| format!("关闭标签页失败: {}", e))?;
+    //tokio::time::sleep(Duration::from_secs(1150)).await;
+    Ok(list)
 }
