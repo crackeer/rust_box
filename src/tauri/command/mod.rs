@@ -8,3 +8,4 @@ pub mod network;
 pub mod ssh;
 pub mod ftp;
 pub mod webview;
+pub mod work;
