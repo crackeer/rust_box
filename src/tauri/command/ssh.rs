@@ -27,7 +27,6 @@ lazy_static! {
     pub static ref SESSION_MAP: Arc<Mutex<HashMap<String, Session>>> =
         Arc::new(Mutex::new(HashMap::new()));
     pub static ref UPLOAD_PROGRESS: Arc<Mutex<(u64, u64)>> = Arc::new(Mutex::new((100, 0)));
-    pub static ref DOWNLOAD_PROGRESS: Arc<Mutex<(u64, u64)>> = Arc::new(Mutex::new((100, 0)));
     pub static ref UPLOAD_INFO: Arc<Mutex<UploadInfo>> = Arc::new(Mutex::new(UploadInfo {
         local_file: String::new(),
         remote_file: String::new(),
@@ -70,6 +69,7 @@ fn mark_upload_failure(message: String) {
 }
 
 static mut CANCEL_SIGNAL: i32 = 10;
+static mut DOWNLOAD_SIZE: i64 = 0;
 
 const AUTH_TYPE_PASSWORD: &str = &"password";
 
@@ -101,46 +101,41 @@ drwx------ 4 501 games 4096 Jan 29 17:17 projec -src
 -rw-r--r-- 1 roo roo 706563 Jun 19 14:33 realsee-vr-local.2.3.0-5cf4997-nuc. ar.gz
 */
 #[tauri::command]
-pub async fn remote_list_files(session_key: String, path: String) -> InvokeResponse {
-    let list = SESSION_MAP.lock().unwrap();
-    match list.get(&session_key) {
-        Some(sess) => {
-            let mut channel = sess.channel_session().unwrap();
-            channel.exec(&format!("ls -l {}", path)).unwrap();
-            let mut result = String::new();
-            _ = channel.read_to_string(&mut result);
-            let list: Vec<&str> = result.split("\n").collect();
-            let mut file_list: Vec<File> = Vec::new();
-            for item in list.iter() {
-                let parts: Vec<&str> = item.split(" ").filter(|x| x.len() > 0).collect();
-                //println!("{} - {}", parts.len(), parts.join("T").as_str());
-                if parts.len() < 9 {
-                    continue;
-                }
-                file_list.push(File {
-                    access: String::from(parts[0]),
-                    group: String::from(parts[2]),
-                    user: String::from(parts[3]),
-                    size: String::from(parts[4]),
-                    month: String::from(parts[5]),
-                    day: String::from(parts[6]),
-                    time: String::from(parts[7]),
-                    name: String::from(parts[8]),
-                    is_dir: parts[0].starts_with("d"),
-                })
-            }
-            InvokeResponse {
-                success: true,
-                message: "".to_string(),
-                data: json!(file_list),
-            }
+pub async fn remote_list_files(session_key: String, path: String) -> Result<Vec<File>, String> {
+    let list = SESSION_MAP
+        .lock()
+        .map_err(|e| format!("get session map error:{}", e))?;
+    let session = list.get(&session_key).ok_or("no session")?;
+    let mut channel = session
+        .channel_session()
+        .map_err(|e| format!("get channel error:{}", e))?;
+    channel
+        .exec(&format!("ls -l {}", path))
+        .map_err(|e| format!("exec error:{}", e))?;
+    let mut result = String::new();
+    _ = channel
+        .read_to_string(&mut result)
+        .map_err(|e| format!("read error:{}", e))?;
+    let list: Vec<&str> = result.split("\n").collect();
+    let mut file_list: Vec<File> = Vec::new();
+    for item in list.iter() {
+        let parts: Vec<&str> = item.split(" ").filter(|x| x.len() > 0).collect();
+        if parts.len() < 9 {
+            continue;
         }
-        None => InvokeResponse {
-            success: false,
-            message: String::from("no session"),
-            data: json!(null),
-        },
+        file_list.push(File {
+            access: String::from(parts[0]),
+            group: String::from(parts[2]),
+            user: String::from(parts[3]),
+            size: String::from(parts[4]),
+            month: String::from(parts[5]),
+            day: String::from(parts[6]),
+            time: String::from(parts[7]),
+            name: String::from(parts[8]),
+            is_dir: parts[0].starts_with("d"),
+        })
     }
+    Ok(file_list)
 }
 
 #[tauri::command]
@@ -148,86 +143,59 @@ pub async fn download_remote_file(
     session_key: String,
     path: String,
     local_save_path: String,
-) -> InvokeResponse {
-    let list = SESSION_MAP.lock().unwrap();
-    unsafe { CANCEL_SIGNAL = 0 }
-    let session = list.get(&session_key);
-    if let None = session {
-        return InvokeResponse {
-            success: false,
-            message: String::from("no session"),
-            data: json!(null),
-        };
-    }
-    let sess = session.unwrap();
-
-    let (mut remote_file, stat) = sess.scp_recv(Path::new(&path.as_str())).unwrap();
+) -> Result<serde_json::Value, String> {
+    let list = SESSION_MAP
+        .lock()
+        .map_err(|e| format!("get session map error:{}", e))?;
+    let session = list.get(&session_key).ok_or("no session")?;
+    let (mut remote_file, stat) = session
+        .scp_recv(Path::new(&path.as_str()))
+        .map_err(|e| format!("scp recv error:{}", e))?;
     println!("remote file size: {}", stat.size());
-    DOWNLOAD_PROGRESS.lock().unwrap().0 = stat.size();
-    DOWNLOAD_PROGRESS.lock().unwrap().1 = 0;
     const BUFFER_SIZE: usize = 1024;
     let mut buffer = [0u8; BUFFER_SIZE];
     let file_path = Path::new(&local_save_path);
-    if let Some(p) = file_path.parent() {
-        match fs::metadata(p) {
-            Ok(_) => {}
-            Err(e) => {
-                if let Err(err) = fs::create_dir_all(p) {
-                    return InvokeResponse {
-                        success: false,
-                        message: format!(
-                            "create dir `{}` error: {}",
-                            p.to_string_lossy(),
-                            err.to_string()
-                        ),
-                        data: json!(null),
-                    };
-                }
-            }
-        };
+    let mut tmp_file  = fs::File::create(file_path).map_err(|e| format!("create file error:{}", e))?;
+    // 1. create dir if not exists
+    let save_dir = file_path.parent().ok_or("no parent dir")?;
+    if let Err(err) = fs::create_dir_all(save_dir) {
+        return Err(format!(
+            "create dir `{}` error: {}",
+            save_dir.to_string_lossy(),
+            err.to_string()
+        ));
     }
-    let tmp_file = fs::File::create(Path::new(&local_save_path.as_str()));
-    unsafe { CANCEL_SIGNAL = 0 }
-    loop {
-        unsafe {
-            if CANCEL_SIGNAL > 0 {
-                return InvokeResponse {
-                    success: false,
-                    message: String::from("user cancelled"),
-                    data: json!(null),
-                };
-            }
-        }
 
-        match remote_file.read(buffer.as_mut_slice()) {
-            Ok(size) => {
-                let mut download_progress = DOWNLOAD_PROGRESS.lock().unwrap();
-                download_progress.1 = download_progress.1 + size as u64;
-                _ = tmp_file.as_ref().unwrap().write(&buffer[..size]);
-                if size < BUFFER_SIZE {
+    tokio::spawn(async move {
+        let mut download_size = 0;
+        loop {
+            unsafe {
+                if CANCEL_SIGNAL > 0 {
                     break;
                 }
             }
-            Err(err) => {
-                return InvokeResponse {
-                    success: false,
-                    message: err.to_string(),
-                    data: json!(null),
-                };
+            match remote_file.read(buffer.as_mut_slice()) {
+                Ok(size) => {
+                    download_size += size;
+                    let _ = tmp_file.write(&buffer[..size]);
+                    if size < BUFFER_SIZE {
+                        break;
+                    }
+                }
+                Err(_) => {
+                    break;
+                }
             }
         }
-    }
-
-    remote_file.send_eof().unwrap();
-    remote_file.wait_eof().unwrap();
-    remote_file.close().unwrap();
-    remote_file.wait_close().unwrap();
-
-    return InvokeResponse {
-        success: true,
-        message: "success".to_string(),
-        data: json!(null),
-    };
+        remote_file.send_eof().unwrap();
+        remote_file.wait_eof().unwrap();
+        remote_file.close().unwrap();
+        remote_file.wait_close().unwrap();
+    });
+    Ok(json!({
+        "path": local_save_path,
+        "size": stat.size(),
+    }))
 }
 
 #[tauri::command]
@@ -443,18 +411,6 @@ pub async fn remote_exec_command(
     }
 }
 
-#[tauri::command]
-pub async fn get_download_progress() -> InvokeResponse {
-    let progress = DOWNLOAD_PROGRESS.lock().unwrap();
-    InvokeResponse {
-        success: true,
-        message: String::from("ok"),
-        data: json!({
-            "total_size" : progress.0,
-            "download_size" : progress.1
-        }),
-    }
-}
 
 #[tauri::command]
 pub async fn get_upload_progress() -> InvokeResponse {

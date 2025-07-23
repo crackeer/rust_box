@@ -9,3 +9,4 @@ pub mod ssh;
 pub mod ftp;
 pub mod webview;
 pub mod work;
+pub mod opener;
