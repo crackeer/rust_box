@@ -12,6 +12,7 @@ use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UploadInfo {
@@ -69,8 +70,7 @@ fn mark_upload_failure(message: String) {
 }
 
 static mut CANCEL_SIGNAL: i32 = 10;
-static mut DOWNLOAD_SIZE: i64 = 0;
-
+const BUFFER_SIZE: usize = 1024;
 const AUTH_TYPE_PASSWORD: &str = &"password";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -140,6 +140,7 @@ pub async fn remote_list_files(session_key: String, path: String) -> Result<Vec<
 
 #[tauri::command]
 pub async fn download_remote_file(
+    app: AppHandle,
     session_key: String,
     path: String,
     local_save_path: String,
@@ -148,24 +149,18 @@ pub async fn download_remote_file(
         .lock()
         .map_err(|e| format!("get session map error:{}", e))?;
     let session = list.get(&session_key).ok_or("no session")?;
+
+    // 1. get remote file size
     let (mut remote_file, stat) = session
         .scp_recv(Path::new(&path.as_str()))
         .map_err(|e| format!("scp recv error:{}", e))?;
     println!("remote file size: {}", stat.size());
-    const BUFFER_SIZE: usize = 1024;
     let mut buffer = [0u8; BUFFER_SIZE];
     let file_path = Path::new(&local_save_path);
     let mut tmp_file  = fs::File::create(file_path).map_err(|e| format!("create file error:{}", e))?;
-    // 1. create dir if not exists
+    // 2. create dir if not exists
     let save_dir = file_path.parent().ok_or("no parent dir")?;
-    if let Err(err) = fs::create_dir_all(save_dir) {
-        return Err(format!(
-            "create dir `{}` error: {}",
-            save_dir.to_string_lossy(),
-            err.to_string()
-        ));
-    }
-
+    fs::create_dir_all(save_dir).map_err(|e| format!("create dir error:{}", e))?;
     tokio::spawn(async move {
         let mut download_size = 0;
         loop {
@@ -178,11 +173,10 @@ pub async fn download_remote_file(
                 Ok(size) => {
                     download_size += size;
                     let _ = tmp_file.write(&buffer[..size]);
-                    if size < BUFFER_SIZE {
-                        break;
-                    }
+                    app.emit("download-progress", download_size).unwrap();
                 }
-                Err(_) => {
+                Err(err) => {
+                    println!("download error:{}", err);
                     break;
                 }
             }
