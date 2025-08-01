@@ -2,8 +2,8 @@ use super::define::{failure_response, success_response, InvokeResponse, Message}
 use serde_json::json;
 use std::{ process::Command};
 use tauri;
-use quickjs_runtime::facade::QuickjsRuntimeFacade;
-
+//use quickjs_runtime::builder::QuickJsRuntimeBuilder;
+//use quickjs_runtime::jsutils::Script;
 #[tauri::command]
 pub fn run_js_code(node_path: String, code: String) -> InvokeResponse {
     match Command::new(&node_path).arg("-e").arg(code).output() {
@@ -23,11 +23,15 @@ pub fn run_js_code(node_path: String, code: String) -> InvokeResponse {
     }
 }
 
+/*
 #[tauri::command]
 pub async fn run_js_script(script_code: String) -> Result<String, String> {
-    let runtime = QuickjsRuntimeFacade::new();
-    let result = runtime.eval(script_code).await.map_err(|e| e.to_string())?;
+    let runtime = QuickJsRuntimeBuilder::new().build();
+    let realm_name = "main";
+    let script = Script::new(realm_name, &script_code);
+    let result = runtime.eval(None, script).await.map_err(|e| e.to_string())?;
     Ok(result)
 }
+     */
 
 
