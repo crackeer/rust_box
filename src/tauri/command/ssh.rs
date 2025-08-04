@@ -45,7 +45,7 @@ fn init_upload_info(local_file: String, remote_file: String, total_size: u64) {
     upload_info.remote_file = remote_file;
     upload_info.total_size = total_size;
     upload_info.upload_size = 0;
-    upload_info.status = String::from("running");
+    upload_info.status = String::from("uploading");
     upload_info.message = String::from("");
 }
 
@@ -67,6 +67,14 @@ fn mark_upload_failure(message: String) {
     let upload_info = upload_info.borrow_mut();
     upload_info.status = String::from("failure");
     upload_info.message = message;
+}
+
+fn mark_upload_success() {
+    let mut upload_info = UPLOAD_INFO.lock().unwrap();
+    let upload_info = upload_info.borrow_mut();
+    upload_info.status = String::from("success");
+    upload_info.upload_size = upload_info.total_size;
+    upload_info.message = String::from("");
 }
 
 static mut CANCEL_SIGNAL: i32 = 10;
@@ -228,6 +236,7 @@ pub async fn upload_remote_file(
                 break;
             }
             let size = result.unwrap().len();
+            println!("upload size: {}", size);
             if size > 0 {
                 if let Err(err) = remote_channel.write(reader.buffer()) {
                     mark_upload_failure(err.to_string());
@@ -239,7 +248,7 @@ pub async fn upload_remote_file(
             reader.consume(size);
             incr_upload_size(size as u64);
         }
-        clear_upload_info();
+        mark_upload_success();
         remote_channel.send_eof().unwrap();
         remote_channel.wait_eof().unwrap();
         remote_channel.close().unwrap();
@@ -368,13 +377,9 @@ pub async fn remote_exec_command(
 }
 
 #[tauri::command]
-pub async fn get_upload_progress() -> InvokeResponse {
-    let progress = UPLOAD_INFO.lock().unwrap();
-    InvokeResponse {
-        success: true,
-        message: String::from("ok"),
-        data: json!(progress.clone()),
-    }
+pub async fn get_upload_remote_progress() -> Result<UploadInfo, String> {
+    let progress = UPLOAD_INFO.lock().map_err(|e| e.to_string())?;
+    Ok(progress.clone())
 }
 
 #[tauri::command]
