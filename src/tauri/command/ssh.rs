@@ -157,7 +157,8 @@ pub async fn download_remote_file(
     println!("remote file size: {}", stat.size());
     let mut buffer = [0u8; BUFFER_SIZE];
     let file_path = Path::new(&local_save_path);
-    let mut tmp_file  = fs::File::create(file_path).map_err(|e| format!("create file error:{}", e))?;
+    let mut tmp_file =
+        fs::File::create(file_path).map_err(|e| format!("create file error:{}", e))?;
     // 2. create dir if not exists
     let save_dir = file_path.parent().ok_or("no parent dir")?;
     fs::create_dir_all(save_dir).map_err(|e| format!("create dir error:{}", e))?;
@@ -195,97 +196,67 @@ pub async fn download_remote_file(
 #[tauri::command]
 pub async fn upload_remote_file(
     session_key: String,
-    path: String,
     local_file: String,
-) -> InvokeResponse {
+    remote_file: String,
+) -> Result<String, String> {
     let list = SESSION_MAP.lock().unwrap();
-    let session = list.get(&session_key);
-    if let None = session {
-        return InvokeResponse {
-            success: false,
-            message: String::from("no session"),
-            data: json!(null),
-        };
-    }
-    let sess = session.unwrap();
-    let file_size = match fs::metadata(&local_file.to_string()) {
-        Ok(meta) => meta.len(),
-        Err(_) => 0,
-    };
-    if file_size < 1 {
+    let session = list.get(&session_key).ok_or("no session")?;
+
+    let metadata = fs::metadata(&local_file.to_string()).map_err(|e| e.to_string())?;
+    if metadata.len() < 1 {
         mark_upload_failure(String::from("file empty"));
-        return InvokeResponse {
-            success: false,
-            message: String::from("file empty"),
-            data: json!(null),
-        };
+        return Err(String::from("file empty"));
     }
 
-    let mut remote_file = sess
-        .scp_send(Path::new(&path.as_str()), 0o644, file_size, None)
-        .unwrap();
-
-    let tmp_file = fs::File::open(Path::new(&local_file.as_str()));
-
-    let mut reader = BufReader::new(tmp_file.unwrap()); // 创建 BufReader
-    init_upload_info(local_file.to_string(), path.to_string(), file_size);
-    unsafe { CANCEL_SIGNAL = 0 }
-    loop {
-        unsafe {
-            if CANCEL_SIGNAL > 0 {
-                return InvokeResponse {
-                    success: false,
-                    message: String::from("user cancelled"),
-                    data: json!(null),
-                };
+    let mut remote_channel = session
+        .scp_send(Path::new(&remote_file.as_str()), 0o644, metadata.len(), None)
+        .map_err(|e| e.to_string())?;
+    let tmp_file = fs::File::open(Path::new(&local_file.as_str())).map_err(|e| e.to_string())?;
+     unsafe { CANCEL_SIGNAL = 0 }
+    tokio::spawn(async move  {
+        let mut reader = BufReader::new(tmp_file); // 创建 BufReader
+        init_upload_info(local_file.to_string(), remote_file.to_string(), metadata.len());
+        loop {
+            unsafe {
+                if CANCEL_SIGNAL > 0 {
+                    break;
+                }
             }
-        }
-
-        let result = reader.fill_buf();
-        if let Err(err) = result {
-            mark_upload_failure(err.to_string());
-            return InvokeResponse {
-                success: false,
-                message: err.to_string(),
-                data: json!(null),
-            };
-        }
-        let size = result.unwrap().len();
-        if size > 0 {
-            if let Err(err) = remote_file.write(reader.buffer()) {
+            let result = reader.fill_buf();
+            if let Err(err) = result {
                 mark_upload_failure(err.to_string());
-                return InvokeResponse {
-                    success: false,
-                    message: err.to_string(),
-                    data: json!(null),
-                };
+                break;
             }
-        } else {
-            break;
+            let size = result.unwrap().len();
+            if size > 0 {
+                if let Err(err) = remote_channel.write(reader.buffer()) {
+                    mark_upload_failure(err.to_string());
+                    break;
+                }
+            } else {
+                break;
+            }
+            reader.consume(size);
+            incr_upload_size(size as u64);
         }
-        reader.consume(size);
-        incr_upload_size(size as u64);
-    }
-    clear_upload_info();
-    remote_file.send_eof().unwrap();
-    remote_file.wait_eof().unwrap();
-    remote_file.close().unwrap();
-    remote_file.wait_close().unwrap();
+        clear_upload_info();
+        remote_channel.send_eof().unwrap();
+        remote_channel.wait_eof().unwrap();
+        remote_channel.close().unwrap();
+        remote_channel.wait_close().unwrap();
+    });
 
-    InvokeResponse {
-        success: true,
-        message: "success".to_string(),
-        data: json!(null),
-    }
+    Ok(String::from("success"))
 }
 
 fn connect_ssh_session(
     user: &str,
     host: &str,
+    port: &str,
     auth_type: &str,
     auth_config: &str,
 ) -> Result<Session, String> {
-    let connection = TcpStream::connect(format!("{}:22", host));
+    let connection = TcpStream::connect(format!("{}:{}", host, port));
     if let Err(err) = connection {
         return Err(err.to_string());
     }
@@ -324,10 +295,11 @@ fn connect_ssh_session(
 pub async fn test_server_connect(
     user: String,
     host: String,
+    port: String,
     auth_type: String,
     auth_config: String,
 ) -> InvokeResponse {
-    let session = connect_ssh_session(&user, &host, &auth_type, &auth_config);
+    let session = connect_ssh_session(&user, &host, &port, &auth_type, &auth_config);   
     if let Err(err) = session {
         return InvokeResponse {
             success: false,
@@ -346,27 +318,17 @@ pub async fn test_server_connect(
 pub async fn connect_server(
     user: String,
     host: String,
+    port: String,
     auth_type: String,
     auth_config: String,
-) -> InvokeResponse {
-    let session = connect_ssh_session(&user, &host, &auth_type, &auth_config);
-    if let Err(err) = session {
-        return InvokeResponse {
-            success: false,
-            message: err.to_string(),
-            data: json!(null),
-        };
-    }
+) -> Result<String, String> {
+    let session = connect_ssh_session(&user, &host, &port, &auth_type, &auth_config).map_err(|e| e.to_string())?;
     let session_key = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
     SESSION_MAP
         .lock()
         .unwrap()
-        .insert(session_key.clone(), session.unwrap());
-    return InvokeResponse {
-        success: true,
-        message: "ok".to_string(),
-        data: json!({ "session_key": session_key }),
-    };
+        .insert(session_key.clone(), session);
+    Ok(session_key)
 }
 
 #[tauri::command]
@@ -404,7 +366,6 @@ pub async fn remote_exec_command(
         },
     }
 }
-
 
 #[tauri::command]
 pub async fn get_upload_progress() -> InvokeResponse {
