@@ -71,7 +71,7 @@ fn mark_transfer_success() {
     transfer_info.message = String::from("");
 }
 
-static mut CANCEL_SIGNAL: i32 = 10;
+static mut CANCEL_SIGNAL: i32 = 0;
 const BUFFER_SIZE: usize = 1024;
 const AUTH_TYPE_PASSWORD: &str = &"password";
 
@@ -155,6 +155,7 @@ pub async fn download_remote_file(
     let (mut remote_channel, stat) = session
         .scp_recv(Path::new(&remote_file.as_str()))
         .map_err(|e| format!("scp recv error:{}", e))?;
+     println!("download remote file:{} size:{}", remote_file, stat.size());
     let mut buffer = [0u8; BUFFER_SIZE];
     let file_path = Path::new(&local_file);
     // 2. create dir if not exists
@@ -162,29 +163,38 @@ pub async fn download_remote_file(
     fs::create_dir_all(save_dir).map_err(|e| format!("create dir error:{}", e))?;
     let mut tmp_file =
         fs::File::create(file_path).map_err(|e| format!("create file error:{}", e))?;
-
     tokio::spawn(async move {
-        let mut download_size = 0;
         init_transfer_info(local_file, remote_file, stat.size() as u64);
+        let mut download_error = false;
         loop {
             unsafe {
+                println!("CANCEL_SIGNAL:{}", CANCEL_SIGNAL);
                 if CANCEL_SIGNAL > 0 {
+                    download_error = true;
                     break;
                 }
             }
-            match remote_channel.read(buffer.as_mut_slice()) {
-                Ok(size) => {
-                    download_size += size;
-                    let _ = tmp_file.write(&buffer[..size]);
-                    incr_transfer_size(size as u64);
-                }
-                Err(err) => {
-                    mark_transfer_failure(err.to_string());
+            println!("download loop");
+            let result = remote_channel.read(buffer.as_mut_slice());
+            if let Err(err) = result {
+                println!("download error:{}", err);
+                mark_transfer_failure(err.to_string());
+                download_error = true;
+                break;
+            }
+
+            if let Ok(size) = result {
+                println!("download size: {}", size);
+                if size == 0 {
                     break;
                 }
+                let _ = tmp_file.write(&buffer[..size]);
+                incr_transfer_size(size as u64);
             }
         }
-        mark_transfer_success();
+        if !download_error {
+            mark_transfer_success();
+        }
         remote_channel.send_eof().unwrap();
         remote_channel.wait_eof().unwrap();
         remote_channel.close().unwrap();
@@ -212,7 +222,7 @@ pub async fn upload_remote_file(
         .scp_send(Path::new(&remote_file.as_str()), 0o644, metadata.len(), None)
         .map_err(|e| e.to_string())?;
     let tmp_file = fs::File::open(Path::new(&local_file.as_str())).map_err(|e| e.to_string())?;
-     unsafe { CANCEL_SIGNAL = 0 }
+    //unsafe { CANCEL_SIGNAL = 0 }
     tokio::spawn(async move  {
         let mut reader = BufReader::new(tmp_file); // 创建 BufReader
         init_transfer_info(local_file.to_string(), remote_file.to_string(), metadata.len());
@@ -228,12 +238,12 @@ pub async fn upload_remote_file(
                 break;
             }
             let size = result.unwrap().len();
-            println!("upload size: {}", size);
             if size > 0 {
                 if let Err(err) = remote_channel.write(reader.buffer()) {
                     mark_transfer_failure(err.to_string());
                     break;
                 }
+                
             } else {
                 break;
             }
