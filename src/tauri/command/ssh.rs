@@ -15,11 +15,11 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct UploadInfo {
+pub struct TransferInfo {
     local_file: String,
     remote_file: String,
-    total_size: u64,
-    upload_size: u64,
+    total: u64,
+    current: u64,
     status: String,
     message: String,
 }
@@ -28,53 +28,47 @@ lazy_static! {
     pub static ref SESSION_MAP: Arc<Mutex<HashMap<String, Session>>> =
         Arc::new(Mutex::new(HashMap::new()));
     pub static ref UPLOAD_PROGRESS: Arc<Mutex<(u64, u64)>> = Arc::new(Mutex::new((100, 0)));
-    pub static ref UPLOAD_INFO: Arc<Mutex<UploadInfo>> = Arc::new(Mutex::new(UploadInfo {
+    pub static ref TRANSFER_INFO: Arc<Mutex<TransferInfo>> = Arc::new(Mutex::new(TransferInfo {
         local_file: String::new(),
         remote_file: String::new(),
-        total_size: 0,
-        upload_size: 0,
+        total: 0,
+        current: 0,
         status: String::new(),
         message: String::new(),
     }));
 }
 
-fn init_upload_info(local_file: String, remote_file: String, total_size: u64) {
-    let mut upload_info = UPLOAD_INFO.lock().unwrap();
-    let upload_info = upload_info.borrow_mut();
-    upload_info.local_file = local_file;
-    upload_info.remote_file = remote_file;
-    upload_info.total_size = total_size;
-    upload_info.upload_size = 0;
-    upload_info.status = String::from("uploading");
-    upload_info.message = String::from("");
+fn init_transfer_info(local_file: String, remote_file: String, total_size: u64) {
+    let mut transfer_info = TRANSFER_INFO.lock().unwrap();
+    let transfer_info = transfer_info.borrow_mut();
+    transfer_info.local_file = local_file;
+    transfer_info.remote_file = remote_file;
+    transfer_info.total = total_size;
+    transfer_info.current = 0;
+    transfer_info.status = String::from("transferring");
+    transfer_info.message = String::from("");
 }
 
-fn incr_upload_size(size: u64) {
-    let mut upload_info = UPLOAD_INFO.lock().unwrap();
-    let upload_info = upload_info.borrow_mut();
-    upload_info.upload_size = upload_info.upload_size + size;
+fn incr_transfer_size(size: u64) {
+    let mut transfer_info = TRANSFER_INFO.lock().unwrap();
+    let transfer_info = transfer_info.borrow_mut();
+    transfer_info.current = transfer_info.current + size;
 }
 
-fn clear_upload_info() {
-    let mut upload_info = UPLOAD_INFO.lock().unwrap();
-    let upload_info = upload_info.borrow_mut();
-    upload_info.local_file = String::from("");
-    upload_info.remote_file = String::from("");
+
+fn mark_transfer_failure(message: String) {
+    let mut transfer_info = TRANSFER_INFO.lock().unwrap();
+    let transfer_info = transfer_info.borrow_mut();
+    transfer_info.status = String::from("failure");
+    transfer_info.message = message;
 }
 
-fn mark_upload_failure(message: String) {
-    let mut upload_info = UPLOAD_INFO.lock().unwrap();
-    let upload_info = upload_info.borrow_mut();
-    upload_info.status = String::from("failure");
-    upload_info.message = message;
-}
-
-fn mark_upload_success() {
-    let mut upload_info = UPLOAD_INFO.lock().unwrap();
-    let upload_info = upload_info.borrow_mut();
-    upload_info.status = String::from("success");
-    upload_info.upload_size = upload_info.total_size;
-    upload_info.message = String::from("");
+fn mark_transfer_success() {
+    let mut transfer_info = TRANSFER_INFO.lock().unwrap();
+    let transfer_info = transfer_info.borrow_mut();
+    transfer_info.status = String::from("success");
+    transfer_info.current = transfer_info.total;
+    transfer_info.message = String::from("");
 }
 
 static mut CANCEL_SIGNAL: i32 = 10;
@@ -148,57 +142,55 @@ pub async fn remote_list_files(session_key: String, path: String) -> Result<Vec<
 
 #[tauri::command]
 pub async fn download_remote_file(
-    app: AppHandle,
     session_key: String,
-    path: String,
-    local_save_path: String,
-) -> Result<serde_json::Value, String> {
+    local_file: String,
+    remote_file: String,
+) -> Result<String, String> {
     let list = SESSION_MAP
         .lock()
         .map_err(|e| format!("get session map error:{}", e))?;
     let session = list.get(&session_key).ok_or("no session")?;
 
     // 1. get remote file size
-    let (mut remote_file, stat) = session
-        .scp_recv(Path::new(&path.as_str()))
+    let (mut remote_channel, stat) = session
+        .scp_recv(Path::new(&remote_file.as_str()))
         .map_err(|e| format!("scp recv error:{}", e))?;
-    println!("remote file size: {}", stat.size());
     let mut buffer = [0u8; BUFFER_SIZE];
-    let file_path = Path::new(&local_save_path);
-    let mut tmp_file =
-        fs::File::create(file_path).map_err(|e| format!("create file error:{}", e))?;
+    let file_path = Path::new(&local_file);
     // 2. create dir if not exists
     let save_dir = file_path.parent().ok_or("no parent dir")?;
     fs::create_dir_all(save_dir).map_err(|e| format!("create dir error:{}", e))?;
+    let mut tmp_file =
+        fs::File::create(file_path).map_err(|e| format!("create file error:{}", e))?;
+
     tokio::spawn(async move {
         let mut download_size = 0;
+        init_transfer_info(local_file, remote_file, stat.size() as u64);
         loop {
             unsafe {
                 if CANCEL_SIGNAL > 0 {
                     break;
                 }
             }
-            match remote_file.read(buffer.as_mut_slice()) {
+            match remote_channel.read(buffer.as_mut_slice()) {
                 Ok(size) => {
                     download_size += size;
                     let _ = tmp_file.write(&buffer[..size]);
-                    app.emit("download-progress", download_size).unwrap();
+                    incr_transfer_size(size as u64);
                 }
                 Err(err) => {
-                    println!("download error:{}", err);
+                    mark_transfer_failure(err.to_string());
                     break;
                 }
             }
         }
-        remote_file.send_eof().unwrap();
-        remote_file.wait_eof().unwrap();
-        remote_file.close().unwrap();
-        remote_file.wait_close().unwrap();
+        mark_transfer_success();
+        remote_channel.send_eof().unwrap();
+        remote_channel.wait_eof().unwrap();
+        remote_channel.close().unwrap();
+        remote_channel.wait_close().unwrap();
     });
-    Ok(json!({
-        "path": local_save_path,
-        "size": stat.size(),
-    }))
+    Ok(String::from("success"))
 }
 
 #[tauri::command]
@@ -212,7 +204,7 @@ pub async fn upload_remote_file(
 
     let metadata = fs::metadata(&local_file.to_string()).map_err(|e| e.to_string())?;
     if metadata.len() < 1 {
-        mark_upload_failure(String::from("file empty"));
+        mark_transfer_failure(String::from("file empty"));
         return Err(String::from("file empty"));
     }
 
@@ -223,7 +215,7 @@ pub async fn upload_remote_file(
      unsafe { CANCEL_SIGNAL = 0 }
     tokio::spawn(async move  {
         let mut reader = BufReader::new(tmp_file); // 创建 BufReader
-        init_upload_info(local_file.to_string(), remote_file.to_string(), metadata.len());
+        init_transfer_info(local_file.to_string(), remote_file.to_string(), metadata.len());
         loop {
             unsafe {
                 if CANCEL_SIGNAL > 0 {
@@ -232,23 +224,23 @@ pub async fn upload_remote_file(
             }
             let result = reader.fill_buf();
             if let Err(err) = result {
-                mark_upload_failure(err.to_string());
+                mark_transfer_failure(err.to_string());
                 break;
             }
             let size = result.unwrap().len();
             println!("upload size: {}", size);
             if size > 0 {
                 if let Err(err) = remote_channel.write(reader.buffer()) {
-                    mark_upload_failure(err.to_string());
+                    mark_transfer_failure(err.to_string());
                     break;
                 }
             } else {
                 break;
             }
             reader.consume(size);
-            incr_upload_size(size as u64);
+            incr_transfer_size(size as u64);
         }
-        mark_upload_success();
+        mark_transfer_success();
         remote_channel.send_eof().unwrap();
         remote_channel.wait_eof().unwrap();
         remote_channel.close().unwrap();
@@ -377,8 +369,8 @@ pub async fn remote_exec_command(
 }
 
 #[tauri::command]
-pub async fn get_upload_remote_progress() -> Result<UploadInfo, String> {
-    let progress = UPLOAD_INFO.lock().map_err(|e| e.to_string())?;
+pub async fn get_transfer_remote_progress() -> Result<TransferInfo, String> {
+    let progress = TRANSFER_INFO.lock().map_err(|e| e.to_string())?;
     Ok(progress.clone())
 }
 
