@@ -10,18 +10,11 @@ use std::{
 };
 
 #[tauri::command]
-pub fn get_file_content(name: String) -> InvokeResponse {
-    let file = File::open(name);
-    match file {
-        Ok(mut f) => {
-            let mut content = String::new();
-            if let Err(err) = f.read_to_string(&mut content) {
-                return failure_response(Message::IoError(err));
-            }
-            success_response(Value::String(content))
-        }
-        Err(err) => return failure_response(Message::IoError(err)),
-    }
+pub fn get_file_content(name: String) -> Result<String, String> {
+    let mut file = File::open(name).map_err(|e| e.to_string())?;
+    let mut content = String::new();
+    file.read_to_string(&mut content).map_err(|e| e.to_string())?;
+    Ok(content)
 }
 
 #[tauri::command]

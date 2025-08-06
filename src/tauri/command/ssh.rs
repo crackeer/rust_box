@@ -55,7 +55,6 @@ fn incr_transfer_size(size: u64) {
     transfer_info.current = transfer_info.current + size;
 }
 
-
 fn mark_transfer_failure(message: String) {
     let mut transfer_info = TRANSFER_INFO.lock().unwrap();
     let transfer_info = transfer_info.borrow_mut();
@@ -155,7 +154,7 @@ pub async fn download_remote_file(
     let (mut remote_channel, stat) = session
         .scp_recv(Path::new(&remote_file.as_str()))
         .map_err(|e| format!("scp recv error:{}", e))?;
-     println!("download remote file:{} size:{}", remote_file, stat.size());
+    println!("download remote file:{} size:{}", remote_file, stat.size());
     let mut buffer = [0u8; BUFFER_SIZE];
     let file_path = Path::new(&local_file);
     // 2. create dir if not exists
@@ -219,13 +218,22 @@ pub async fn upload_remote_file(
     }
 
     let mut remote_channel = session
-        .scp_send(Path::new(&remote_file.as_str()), 0o644, metadata.len(), None)
+        .scp_send(
+            Path::new(&remote_file.as_str()),
+            0o644,
+            metadata.len(),
+            None,
+        )
         .map_err(|e| e.to_string())?;
     let tmp_file = fs::File::open(Path::new(&local_file.as_str())).map_err(|e| e.to_string())?;
     //unsafe { CANCEL_SIGNAL = 0 }
-    tokio::spawn(async move  {
+    tokio::spawn(async move {
         let mut reader = BufReader::new(tmp_file); // 创建 BufReader
-        init_transfer_info(local_file.to_string(), remote_file.to_string(), metadata.len());
+        init_transfer_info(
+            local_file.to_string(),
+            remote_file.to_string(),
+            metadata.len(),
+        );
         loop {
             unsafe {
                 if CANCEL_SIGNAL > 0 {
@@ -243,7 +251,6 @@ pub async fn upload_remote_file(
                     mark_transfer_failure(err.to_string());
                     break;
                 }
-                
             } else {
                 break;
             }
@@ -256,6 +263,54 @@ pub async fn upload_remote_file(
         remote_channel.close().unwrap();
         remote_channel.wait_close().unwrap();
     });
+
+    Ok(String::from("success"))
+}
+
+#[tauri::command]
+pub async fn upload_remote_file_sync(
+    session_key: String,
+    local_file: String,
+    remote_file: String,
+) -> Result<String, String> {
+    let list = SESSION_MAP.lock().unwrap();
+    let session = list.get(&session_key).ok_or("no session")?;
+
+    let metadata = fs::metadata(&local_file.to_string()).map_err(|e| e.to_string())?;
+    if metadata.len() < 1 {
+        mark_transfer_failure(String::from("file empty"));
+        return Err(String::from("file empty"));
+    }
+
+    let mut remote_channel = session
+        .scp_send(
+            Path::new(&remote_file.as_str()),
+            0o644,
+            metadata.len(),
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+    let tmp_file = fs::File::open(Path::new(&local_file.as_str())).map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(tmp_file); // 创建 BufReader
+    init_transfer_info(
+        local_file.to_string(),
+        remote_file.to_string(),
+        metadata.len(),
+    );
+    loop {
+        let result = reader.fill_buf().map_err(|e| e.to_string())?;
+        if result.len() < 1 {
+            break;
+        }
+        let size = result.len();
+        remote_channel.write(reader.buffer()).map_err(|e| e.to_string())?;
+        reader.consume(size);
+    }
+
+    remote_channel.send_eof().unwrap();
+    remote_channel.wait_eof().unwrap();
+    remote_channel.close().unwrap();
+    remote_channel.wait_close().unwrap();
 
     Ok(String::from("success"))
 }
@@ -310,7 +365,7 @@ pub async fn test_server_connect(
     auth_type: String,
     auth_config: String,
 ) -> InvokeResponse {
-    let session = connect_ssh_session(&user, &host, &port, &auth_type, &auth_config);   
+    let session = connect_ssh_session(&user, &host, &port, &auth_type, &auth_config);
     if let Err(err) = session {
         return InvokeResponse {
             success: false,
@@ -326,15 +381,19 @@ pub async fn test_server_connect(
 }
 
 #[tauri::command]
-pub async fn connect_server(
+pub async fn ssh_connect_by_password(
     user: String,
     host: String,
     port: String,
-    auth_type: String,
-    auth_config: String,
+    password: String,
+    key: String,
 ) -> Result<String, String> {
-    let session = connect_ssh_session(&user, &host, &port, &auth_type, &auth_config).map_err(|e| e.to_string())?;
-    let session_key = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+    let session = connect_ssh_session(&user, &host, &port, &AUTH_TYPE_PASSWORD, &password)
+        .map_err(|e| e.to_string())?;
+    let mut session_key = key.clone();
+    if session_key.len() < 1 {
+        session_key = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+    }
     SESSION_MAP
         .lock()
         .unwrap()
@@ -346,16 +405,21 @@ pub async fn connect_server(
 pub async fn remote_exec_command(
     session_key: String,
     cmd_string: String,
-    split: bool,
-) -> Result<Vec<String>, String> {
+) -> Result<String, String> {
     let list = SESSION_MAP.lock().map_err(|e| e.to_string())?;
     let session = list.get(&session_key).ok_or("no session")?;
     let mut channel = session.channel_session().map_err(|e| e.to_string())?;
     channel.exec(&cmd_string).map_err(|e| e.to_string())?;
     let mut result = String::new();
     _ = channel.read_to_string(&mut result);
-    let list: Vec<String> = result.split("\n").map(|s| s.to_string()).collect();
-    Ok(list)
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn exist_ssh_session(session_key: String) -> Result<bool, String> {
+    let list = SESSION_MAP.lock().map_err(|e| e.to_string())?;
+    let _ = list.get(&session_key).ok_or("no session")?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -365,13 +429,9 @@ pub async fn get_transfer_remote_progress() -> Result<TransferInfo, String> {
 }
 
 #[tauri::command]
-pub async fn send_cancel_signal() -> InvokeResponse {
+pub async fn send_cancel_signal() -> Result<bool, String> {
     unsafe { CANCEL_SIGNAL = 1 }
-    InvokeResponse {
-        success: true,
-        message: String::from("ok"),
-        data: json!(null),
-    }
+    Ok(true)
 }
 
 #[tauri::command]
