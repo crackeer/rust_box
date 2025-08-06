@@ -347,35 +347,15 @@ pub async fn remote_exec_command(
     session_key: String,
     cmd_string: String,
     split: bool,
-) -> InvokeResponse {
-    let list = SESSION_MAP.lock().unwrap();
-    match list.get(&session_key) {
-        Some(sess) => {
-            let mut channel = sess.channel_session().unwrap();
-            channel.exec(&cmd_string).unwrap();
-            let mut result = String::new();
-            _ = channel.read_to_string(&mut result);
-            if split {
-                let list: Vec<&str> = result.split("\n").collect();
-                return InvokeResponse {
-                    success: true,
-                    message: "".to_string(),
-                    data: json!(list),
-                };
-            }
-
-            return InvokeResponse {
-                success: true,
-                message: "".to_string(),
-                data: serde_json::Value::String(result),
-            };
-        }
-        None => InvokeResponse {
-            success: false,
-            message: String::from("no session"),
-            data: json!(null),
-        },
-    }
+) -> Result<Vec<String>, String> {
+    let list = SESSION_MAP.lock().map_err(|e| e.to_string())?;
+    let session = list.get(&session_key).ok_or("no session")?;
+    let mut channel = session.channel_session().map_err(|e| e.to_string())?;
+    channel.exec(&cmd_string).map_err(|e| e.to_string())?;
+    let mut result = String::new();
+    _ = channel.read_to_string(&mut result);
+    let list: Vec<String> = result.split("\n").map(|s| s.to_string()).collect();
+    Ok(list)
 }
 
 #[tauri::command]
