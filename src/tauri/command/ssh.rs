@@ -132,7 +132,7 @@ pub async fn remote_list_files(session_key: String, path: String) -> Result<Vec<
             month: String::from(parts[5]),
             day: String::from(parts[6]),
             time: String::from(parts[7]),
-            name: String::from(parts[8]),
+            name: String::from(parts[8..].join(" ")),
             is_dir: parts[0].starts_with("d"),
         })
     }
