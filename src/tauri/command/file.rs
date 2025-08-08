@@ -1,7 +1,6 @@
 use super::define::{failure_response, success_response, InvokeResponse, Message};
 use crate::toolbox::file;
 use serde_json::json;
-use serde_json::Value;
 use std::{
     env,
     fs::{self, File},
@@ -29,18 +28,11 @@ pub fn write_file(name: String, content: String) -> InvokeResponse {
 }
 
 #[tauri::command]
-pub fn write_media_file(dir: String, name: String, content: Vec<u8>) -> InvokeResponse {
-    let tmp_path = std::path::Path::new(&dir);
-    if let Err(err) = std::fs::create_dir_all(&tmp_path) {
-        return failure_response(Message::IoError(err));
-    }
-    let path_buf = tmp_path.join(&name);
-    if let Ok(mut file) = File::create(path_buf.as_path()) {
-        if let Ok(_) = file.write_all(&content) {
-            return success_response(json!(null));
-        }
-    }
-    success_response(json!(null))
+pub fn write_blob_file(file_path: String, content: Vec<u8>) -> Result<(), String> {
+    file::create_file_parent_directory(&file_path).map_err(|e| e.to_string())?;
+    let mut tmp_file = File::create(file_path).map_err(|e| e.to_string())?;
+    tmp_file.write_all(&content).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

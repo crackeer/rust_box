@@ -3,15 +3,14 @@ use std::{fs::read_dir, path::Path};
 use readable::byte::Byte;
 use base64::{engine::general_purpose, Engine as _};
 use mime_guess;
-use crate::toolbox::string;
 
 
 #[allow(dead_code)]
-pub fn create_file_parent_directory(dest: &str) -> Result<(), String> {
-    let path: &Path = Path::new(dest);
-    if let Err(err) = std::fs::create_dir_all(path.parent().unwrap()) {
-        return Err(err.to_string());
-    }
+pub fn create_file_parent_directory<P>(path : P) -> Result<(), String> 
+where P: AsRef<str> {
+    let path = Path::new(path.as_ref());
+    let path = path.parent().ok_or("no parent")?;
+    std::fs::create_dir_all(path).map_err(|err| err.to_string())?;
     return Ok(());
 }
 
