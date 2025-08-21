@@ -41,5 +41,6 @@ pub async fn run_js_script(script_code: String) -> Result<String, String> {
 pub async fn run_quick_js_code(script_code: String) -> Result<String, String> {
     let context = QuickJsRuntimeBuilder::new().build();
     let result = context.eval_sync(None, Script::new("file://main.js", &script_code)).map_err(|e| e.to_string())?;
-    Ok( result.stringify())
+    let data = result.to_json_string().await.map_err(|e| e.to_string())?;
+    Ok(data)
 }
